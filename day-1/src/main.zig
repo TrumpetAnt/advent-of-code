@@ -2,18 +2,19 @@ const std = @import("std");
 const zbench = @import("zbench");
 
 const MyBenchmark = struct {
-    data: []u8,
-
-    fn init(data: []u8) MyBenchmark {
-        // var buf_reader = std.io.bufferedReader(file.reader());
-        // const in_stream = buf_reader.reader();
-
-        return .{ .data = data };
+    fn init() MyBenchmark {
+        return .{};
     }
 
-    pub fn run(self: MyBenchmark, _: std.mem.Allocator) void {
-        var x = std.io.fixedBufferStream(self.data);
-        const res = work_aux(x.reader()) catch |err| {
+    pub fn run(_: MyBenchmark, _: std.mem.Allocator) void {
+        const f = std.fs.cwd().openFile("input.txt", .{}) catch |err| {
+            std.log.info("hmm: {}", .{err});
+            return;
+        };
+        defer f.close();
+        var buf_reader = std.io.bufferedReader(f.reader());
+        const in_stream = buf_reader.reader();
+        const res = work_aux(in_stream) catch |err| {
             std.log.err("we shat the bed in another way: {}", .{err});
             return;
         };
@@ -29,18 +30,7 @@ pub fn main() !void {
     var bench = zbench.Benchmark.init(std.heap.page_allocator, .{});
     defer bench.deinit();
 
-    const f = std.fs.cwd().openFile("input.txt", .{}) catch |err| {
-        std.log.info("hmm: {}", .{err});
-        return err;
-    };
-    defer f.close();
-    var buf_reader = std.io.bufferedReader(f.reader());
-    const in_stream = buf_reader.reader();
-    var buffer: [13999]u8 = std.mem.zeroes([13999]u8);
-    _ = try in_stream.readAll(&buffer);
-
-    std.log.info("{s}", .{&buffer});
-    try bench.addParam("Okay", &MyBenchmark.init(&buffer), .{});
+    try bench.addParam("Okay", &MyBenchmark.init(), .{});
 
     try stdout.writeAll("\n");
     try bench.run(stdout);
