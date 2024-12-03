@@ -25,10 +25,10 @@ const ArrayBenchmark = struct {
             std.log.err("we shat the bed in another way: {}", .{err});
             return;
         };
-        if (std.mem.eql(u8, file_path, "demo.txt") and res[0] != 3 or res[1] != 0) {
+        if (std.mem.eql(u8, file_path, "demo.txt") and (res[0] != 3 or res[1] != 5)) {
             std.log.err("we shat the bed: {d}-{d}", .{ res[0], res[1] });
         }
-        if (std.mem.eql(u8, file_path, "input.txt") and res[0] != 639 or res[1] != 0) {
+        if (std.mem.eql(u8, file_path, "input.txt") and (res[0] != 639 or res[1] != 674)) {
             std.log.err("we shat the bed: {d}-{d}", .{ res[0], res[1] });
         }
         //  2113135-19097157
@@ -48,70 +48,79 @@ pub fn main() !void {
 
 fn work(buf: []const u8) ![2]i64 {
     var safe_count: i64 = 0;
-    var copy_cursor: u32 = 0;
-    var safe = true;
-    var c: u32 = 0;
-    while (copy_cursor + c < buf.len and buf[copy_cursor + c] >= 48 and buf[copy_cursor + c] <= 57) {
-        c += 1;
-    }
-    var prev: i32 = std.fmt.parseInt(i32, buf[copy_cursor .. copy_cursor + c], 10) catch |err| {
-        std.log.info("Shit here", .{});
-        return err;
-    };
-    var prev_prev = 0;
-    copy_cursor += c;
-    var prev_diff: i32 = 0;
-    while (true) {
-        while (copy_cursor < buf.len and buf[copy_cursor] == ' ') {
-            copy_cursor += 1;
-        }
-        if (copy_cursor >= buf.len or buf[copy_cursor] == 0) {
-            if (safe) {
-                safe_count += 1;
-            }
-            break;
-        }
-        if (buf[copy_cursor] == '\n') {
-            if (safe) {
-                safe_count += 1;
-            }
-            copy_cursor += 1;
-            if (copy_cursor >= buf.len) {
-                break;
-            }
-            safe = true;
-            c = 0;
-            while (copy_cursor + c < buf.len and buf[copy_cursor + c] >= 48 and buf[copy_cursor + c] <= 57) {
+    var safe_count_with_margin: i64 = 0;
+    var cursor: u32 = 0;
+
+    while (cursor < buf.len and buf[cursor] != 0) {
+        var levels: [10]u8 = std.mem.zeroes([10]u8);
+        var i: u8 = 0;
+        while (cursor < buf.len and buf[cursor] != '\n' and buf[cursor] != 0) {
+            var c: u32 = 0;
+            while (cursor + c < buf.len and buf[cursor + c] >= 48 and buf[cursor + c] <= 57) {
                 c += 1;
             }
-            prev_prev = 0;
-            prev = std.fmt.parseInt(i32, buf[copy_cursor .. copy_cursor + c], 10) catch |err| {
+            levels[i] = std.fmt.parseInt(u8, buf[cursor .. cursor + c], 10) catch |err| {
                 std.log.info("Or here", .{});
                 return err;
             };
-            // std.log.info("Or here {d}", .{c});
-            copy_cursor += c;
-            prev_diff = 0;
-            continue;
+            i += 1;
+            cursor += c;
+            while (cursor < buf.len and buf[cursor] == ' ') {
+                cursor += 1;
+            }
         }
-        c = 0;
-        while (copy_cursor + c < buf.len and buf[copy_cursor + c] >= 48 and buf[copy_cursor + c] <= 57) {
-            c += 1;
+        cursor += 1; // skip newline
+
+        var safe = testReport(&levels, 255);
+        if (safe) {
+            safe_count += 1;
+            safe_count_with_margin += 1;
+        } else {
+            for (0..10) |skip| {
+                safe = testReport(&levels, skip);
+                if (safe) {
+                    break;
+                }
+            }
+            if (safe) {
+                safe_count_with_margin += 1;
+            }
         }
-        const v: i32 = std.fmt.parseInt(i32, buf[copy_cursor .. copy_cursor + c], 10) catch |err| {
-            std.log.info("Or even here buf[{d}]={c}", .{ copy_cursor, buf[copy_cursor] });
-            return err;
-        };
-        copy_cursor += c;
-        const diff: i32 = prev - v;
-        // const prev_safe = safe;
-        safe = safe and diff != 0 and @abs(diff) < 4 and prev_diff * diff >= 0;
-        if (!safe) {}
-        // std.log.info("prev({d}) v({d}) safe({}) prev_safe({}) prev_diff({d})", .{ prev, v, safe, prev_safe, prev_diff });
-        prev_prev = prev;
-        prev = v;
-        prev_diff = diff;
+        // if (safe) {
+        //     std.log.info("Report safe: {any}", .{&levels});
+        // } else {
+        //     std.log.info("Report unsafe: {any}", .{&levels});
+        // }
     }
 
-    return [2]i64{ safe_count, 0 };
+    return [2]i64{ safe_count, safe_count_with_margin };
+}
+
+fn testReport(levels: []u8, skip: usize) bool {
+    var loop_from: usize = 1;
+    if (skip == 0 or skip == 1) {
+        loop_from = 2;
+    }
+    var prev: u8 = levels[0];
+    if (skip == 0) {
+        prev = levels[1];
+    }
+    var prev_diff: i32 = 0;
+    var safe = true;
+    for (loop_from..levels.len) |level| {
+        if (level == skip) {
+            continue;
+        }
+        if (levels[level] == 0) {
+            break;
+        }
+        const diff: i32 = @as(i32, levels[level]) - @as(i32, prev);
+        safe = safe and diff != 0 and @abs(diff) < 4 and diff * prev_diff >= 0;
+        if (!safe) {
+            break;
+        }
+        prev_diff = diff;
+        prev = levels[level];
+    }
+    return safe;
 }
