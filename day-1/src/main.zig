@@ -2,19 +2,24 @@ const std = @import("std");
 const zbench = @import("zbench");
 
 const MyBenchmark = struct {
-    fn init() MyBenchmark {
-        return .{};
-    }
+    data: [13999]u8,
 
-    pub fn run(_: MyBenchmark, _: std.mem.Allocator) void {
+    fn init() MyBenchmark {
         const f = std.fs.cwd().openFile("input.txt", .{}) catch |err| {
             std.log.info("hmm: {}", .{err});
-            return;
+            return .{ .data = undefined };
         };
         defer f.close();
+
         var buf_reader = std.io.bufferedReader(f.reader());
         const in_stream = buf_reader.reader();
-        const res = work_aux(in_stream) catch |err| {
+        var big_buf = std.mem.zeroes([13999]u8);
+        _ = in_stream.readAll(&big_buf) catch {};
+        return .{ .data = big_buf };
+    }
+
+    pub fn run(self: MyBenchmark, _: std.mem.Allocator) void {
+        const res = work(&(self.data)) catch |err| {
             std.log.err("we shat the bed in another way: {}", .{err});
             return;
         };
@@ -36,25 +41,25 @@ pub fn main() !void {
     try bench.run(stdout);
 }
 
-fn work(_: std.mem.Allocator) void {
-    _ = work_aux() catch |err| {
-        std.log.err("{}", .{err});
-        return;
-    };
-    // std.log.info("{d}-{d}", .{ res[0], res[1] });
-}
-
-fn work_aux(in_stream: anytype) ![2]i64 {
+fn work(buf: []const u8) ![2]i64 {
     var buffer: [1024]u8 = undefined;
     const num_rows = 1000;
     var col_1: [num_rows]i32 = undefined;
     var col_2: [num_rows]i32 = undefined;
 
     var i: u32 = 0;
-    while (try in_stream.readUntilDelimiterOrEof(&buffer, '\n')) |line| {
-        col_1[i] = try std.fmt.parseInt(i32, line[0..5], 10);
-        col_2[i] = try std.fmt.parseInt(i32, line[8..], 10);
+    var buf_cursor: u32 = 0;
+    var copy_cursor: u32 = 0;
+    while (buf_cursor < buf.len and i < num_rows) {
+        copy_cursor = 0;
+        while (buf_cursor + copy_cursor < buf.len and buf[buf_cursor + copy_cursor] != '\n') {
+            buffer[copy_cursor] = buf[buf_cursor + copy_cursor];
+            copy_cursor += 1;
+        }
+        col_1[i] = try std.fmt.parseInt(i32, buffer[0..5], 10);
+        col_2[i] = try std.fmt.parseInt(i32, buffer[8..13], 10);
         i += 1;
+        buf_cursor += copy_cursor + 1;
     }
 
     std.mem.sort(i32, &col_1, {}, comptime std.sort.asc(i32));
