@@ -81,7 +81,7 @@ const Tokenizer = struct {
         return .{ .token = self.data[self.cursor - junk_cursor .. self.cursor], .token_type = TokenType.junk };
     }
 
-    fn check_mul_token(self: *Tokenizer) ?Token {
+    inline fn check_mul_token(self: *Tokenizer) ?Token {
         const word = "mul";
         if (self.cursor + word.len <= self.data.len and std.mem.eql(u8, self.data[self.cursor .. self.cursor + word.len], word)) {
             return .{ .token = word, .token_type = TokenType.mul };
@@ -89,7 +89,7 @@ const Tokenizer = struct {
         return null;
     }
 
-    fn check_do_token(self: *Tokenizer) ?Token {
+    inline fn check_do_token(self: *Tokenizer) ?Token {
         const word = "do()";
         if (self.cursor + word.len <= self.data.len and std.mem.eql(u8, self.data[self.cursor .. self.cursor + word.len], word)) {
             return .{ .token = word, .token_type = TokenType.do };
@@ -97,7 +97,7 @@ const Tokenizer = struct {
         return null;
     }
 
-    fn check_dont_token(self: *Tokenizer) ?Token {
+    inline fn check_dont_token(self: *Tokenizer) ?Token {
         const word = "don't()";
         if (self.cursor + word.len <= self.data.len and std.mem.eql(u8, self.data[self.cursor .. self.cursor + word.len], word)) {
             return .{ .token = word, .token_type = TokenType.dont };
@@ -193,7 +193,7 @@ fn work_tokenizer(data: []const u8) ![2]i64 {
     return [2]i64{ total, total_enable_disable };
 }
 
-fn calcualte_window(window: []Token, start: usize) ?i64 {
+inline fn calcualte_window(window: []Token, start: usize) ?i64 {
     if (!(window[start % 5].token_type == TokenType.mul)) {
         return null;
     }
