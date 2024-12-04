@@ -5,24 +5,14 @@ const file_path = "input.txt";
 const file_size = 19740;
 
 const Benchmark = struct {
-    data: [file_size]u8,
+    data: []u8,
 
-    fn init() Benchmark {
-        const f = std.fs.cwd().openFile(file_path, .{}) catch |err| {
-            std.log.info("hmm: {}", .{err});
-            return .{ .data = undefined };
-        };
-        defer f.close();
-
-        var buf_reader = std.io.bufferedReader(f.reader());
-        const in_stream = buf_reader.reader();
-        var big_buf = std.mem.zeroes([file_size]u8);
-        _ = in_stream.readAll(&big_buf) catch {};
-        return .{ .data = big_buf };
+    fn init(buffer: []u8) Benchmark {
+        return .{ .data = buffer };
     }
 
     pub fn run(self: Benchmark, _: std.mem.Allocator) void {
-        const res = work_part_one(&(self.data)) catch |err| {
+        const res = work_part_one(self.data) catch |err| {
             std.log.err("we shat the bed in another way: {}", .{err});
             return;
         };
@@ -36,11 +26,22 @@ const Benchmark = struct {
 };
 
 pub fn main() !void {
+    const f = std.fs.cwd().openFile(file_path, .{}) catch |err| {
+        std.log.info("hmm: {}", .{err});
+        return;
+    };
+    defer f.close();
+
+    var buf_reader = std.io.bufferedReader(f.reader());
+    const in_stream = buf_reader.reader();
+    var big_buf = std.mem.zeroes([file_size]u8);
+    _ = in_stream.readAll(&big_buf) catch {};
+
     const stdout = std.io.getStdOut().writer();
     var bench = zbench.Benchmark.init(std.heap.page_allocator, .{});
     defer bench.deinit();
 
-    try bench.addParam("WordSearch", &Benchmark.init(), .{});
+    try bench.addParam("WordSearch", &Benchmark.init(&big_buf), .{});
 
     try stdout.writeAll("\n");
     try bench.run(stdout);
