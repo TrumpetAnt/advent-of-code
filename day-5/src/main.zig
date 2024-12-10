@@ -125,7 +125,9 @@ pub fn main() !void {
 }
 
 fn work_part_one(data: []const u8) ![2]i64 {
-    const allocator = std.heap.page_allocator;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var page_requirements = std.AutoHashMap(u32, []std.ArrayList(u32)).init(
         allocator,
@@ -187,7 +189,7 @@ fn work_part_one(data: []const u8) ![2]i64 {
             }
         }
 
-        var disqualified = try test_stupid(stupid.items, &page_requirements);
+        var disqualified = try test_stupid(stupid.items, &page_requirements, allocator);
         // std.log.info("disqualified: {d}", .{disqualified});
         if (disqualified < 0 and stupid.items.len > 0) {
             summerino += stupid.items[stupid.items.len / 2];
@@ -195,7 +197,7 @@ fn work_part_one(data: []const u8) ![2]i64 {
         if (disqualified >= 0) {
             // var a_disc = disqualified;
             var yabba = try stupid.clone();
-            if (disqualified != try test_stupid(yabba.items, &page_requirements)) {
+            if (disqualified != try test_stupid(yabba.items, &page_requirements, allocator)) {
                 std.log.info("que", .{});
             }
             var max_count: i32 = 10000;
@@ -210,7 +212,7 @@ fn work_part_one(data: []const u8) ![2]i64 {
                     std.log.err("whopsie daisy", .{});
                     break;
                 }
-                disqualified = try test_stupid(yabba.items, &page_requirements);
+                disqualified = try test_stupid(yabba.items, &page_requirements, allocator);
                 // std.log.info("{d} tried {any}", .{ disqualified, yabba.items });
                 max_count -= 1;
             }
@@ -225,9 +227,9 @@ fn work_part_one(data: []const u8) ![2]i64 {
     return [2]i64{ summerino, summerino_dos };
 }
 
-fn test_stupid(stupid: []u32, page_requirements: *std.AutoHashMap(u32, []std.ArrayList(u32))) !i32 {
+fn test_stupid(stupid: []u32, page_requirements: *std.AutoHashMap(u32, []std.ArrayList(u32)), allocator: std.mem.Allocator) !i32 {
     var disqualifying_pages = std.AutoHashMap(usize, bool).init(
-        std.heap.page_allocator,
+        allocator,
     );
     for (0..stupid.len) |i| {
         const v = stupid[i];
