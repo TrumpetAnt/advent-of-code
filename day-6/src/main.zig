@@ -134,6 +134,32 @@ const GuardIterator = struct {
         return .{ .map = map, .direction = 0, .pos = Position.init(4, 6), .obstacles_by_row = obstacles_by_row, .obstacles_by_col = obstacles_by_col, .visited = std.AutoHashMap(i32, bool).init(allocator), .finished = false };
     }
 
+    // Given starting position and obstacle list, give interval to next obstacle
+    fn interval_calculator(_: *GuardIterator, pos: Position, obstacles: *std.AutoHashMap(u32, *std.ArrayList(u32)), dir_increasing: bool) ?u32 {
+        var res: u32 = 0;
+        if (dir_increasing) {
+            res = 1 << 31;
+        }
+        var any_obstacle = false;
+        if (obstacles.get(pos.x)) |obs| {
+            // std.log.info("Okay {any}", .{obs.items});
+            for (0..obs.items.len) |i| {
+                const obstacle = obs.items[i];
+                if (!dir_increasing and res <= obstacle and obstacle < pos.y) {
+                    res = obstacle;
+                    any_obstacle = true;
+                } else if (dir_increasing and obstacle <= res and obstacle > pos.y) {
+                    res = obstacle;
+                    any_obstacle = true;
+                }
+            }
+        }
+        if (!any_obstacle) {
+            return null;
+        }
+        return res;
+    }
+
     fn visitedCount(self: *GuardIterator) usize {
         var buf: [20000]u8 = std.mem.zeroes([20000]u8);
         var buf_cursor: usize = 0;
@@ -179,111 +205,47 @@ const GuardIterator = struct {
         if (self.finished) {
             return null;
         }
-        var any_obstacle = false;
-        var n: usize = 0;
+        const prev_pos = self.pos;
         switch (self.direction) {
             0 => {
-                n = 0;
+                const r = self.interval_calculator(self.pos, self.obstacles_by_col, false);
+                if (r == null) {
+                    self.finished = true;
+                    self.pos.y = 0;
+                } else {
+                    self.pos.y = @intCast(r.? + 1);
+                }
             },
             1 => {
-                n = self.map.items[0].items.len;
+                const r = self.interval_calculator(Position.init(self.pos.y, self.pos.x), self.obstacles_by_row, true);
+                if (r == null) {
+                    self.finished = true;
+                    self.pos.x = @intCast(self.map.items[0].items.len - 1);
+                } else {
+                    self.pos.x = @intCast(r.? - 1);
+                }
             },
             2 => {
-                n = self.map.items.len;
+                const r = self.interval_calculator(self.pos, self.obstacles_by_col, true);
+                if (r == null) {
+                    self.finished = true;
+                    self.pos.y = @intCast(self.map.items.len - 1);
+                } else {
+                    self.pos.y = @intCast(r.? - 1);
+                }
             },
             3 => {
-                n = 0;
+                const r = self.interval_calculator(Position.init(self.pos.y, self.pos.x), self.obstacles_by_row, false);
+                if (r == null) {
+                    self.finished = true;
+                    self.pos.x = 0;
+                } else {
+                    self.pos.x = @intCast(r.? + 1);
+                }
             },
             else => {},
         }
-        var obstacles: *std.ArrayList(u32) = undefined;
-        if (self.direction % 2 == 0) {
-            if (self.obstacles_by_col.get(self.pos.x)) |obs| {
-                obstacles = obs;
-                // std.log.info("col {d}: {any}", .{ self.pos.x, obs.items });
-            }
-        } else {
-            if (self.obstacles_by_row.get(self.pos.y)) |obs| {
-                obstacles = obs;
-                // std.log.info("row {d}: {any}", .{ self.pos.y, obs.items });
-            }
-        }
-        for (0..obstacles.items.len) |i| {
-            const obstacle = obstacles.items[i];
-            switch (self.direction) {
-                0 => {
-                    if (obstacle < self.pos.y and obstacle >= n) {
-                        n = obstacle;
-                        any_obstacle = true;
-                    }
-                },
-                1 => {
-                    if (obstacle > self.pos.x and obstacle <= n) {
-                        n = obstacle;
-                        any_obstacle = true;
-                    }
-                },
-                2 => {
-                    if (obstacle > self.pos.y and obstacle <= n) {
-                        n = obstacle;
-                        any_obstacle = true;
-                    }
-                },
-                3 => {
-                    if (obstacle < self.pos.x and obstacle >= n) {
-                        n = obstacle;
-                        any_obstacle = true;
-                    }
-                },
-                else => {},
-            }
-        }
 
-        const prev_pos = self.pos;
-
-        if (!any_obstacle) {
-            self.finished = true;
-            switch (self.direction) {
-                0 => {
-                    if (n == self.map.items.len) {
-                        n = 0;
-                    }
-                    self.pos.y = @intCast(n);
-                },
-                1 => {
-                    if (n == self.map.items[0].items.len) {
-                        n -= 1;
-                    }
-                    self.pos.x = @intCast(n);
-                },
-                2 => {
-                    if (n == 0) {
-                        n = self.map.items.len - 1;
-                    }
-                    self.pos.y = @intCast(n);
-                },
-                3 => {
-                    self.pos.x = @intCast(n);
-                },
-                else => {},
-            }
-        } else {
-            switch (self.direction) {
-                0 => {
-                    self.pos.y = @intCast(n + 1);
-                },
-                1 => {
-                    self.pos.x = @intCast(n - 1);
-                },
-                2 => {
-                    self.pos.y = @intCast(n - 1);
-                },
-                3 => {
-                    self.pos.x = @intCast(n + 1);
-                },
-                else => {},
-            }
-        }
         const a: i32 = @intCast(self.pos.x);
         const b: i32 = @intCast(prev_pos.x);
         const c: i32 = @intCast(self.pos.y);
@@ -302,7 +264,7 @@ const GuardIterator = struct {
             sign_diff_y = -1;
         }
         const total_tiles = self.map.items.len * self.map.items[0].items.len;
-        std.log.info("Total tiles: {d}", .{total_tiles});
+        // std.log.info("Total tiles: {d}", .{total_tiles});
         for (0..@abs(diff_x_abs)) |x| {
             const casted: i32 = @intCast(x);
             const _i = (a + sign_diff_x * casted) + c * in_the_a;
