@@ -57,7 +57,7 @@ const Tokenizer = struct {
     }
 };
 
-const file_path = "input.txt";
+const file_path = "demo.txt";
 const file_size = 18000; //15856;
 
 pub fn main() !void {
@@ -125,13 +125,16 @@ const GuardIterator = struct {
     map: *std.ArrayListAligned(std.ArrayList(Token), null),
     obstacles_by_row: *std.AutoHashMap(u32, *std.ArrayList(u32)),
     obstacles_by_col: *std.AutoHashMap(u32, *std.ArrayList(u32)),
+    loop_detector_by_row: std.AutoHashMap(u32, *std.ArrayList([2]u32)),
+    loop_detector_by_col: std.AutoHashMap(u32, *std.ArrayList([2]u32)),
     direction: u8,
     pos: Position,
     visited: std.AutoHashMap(i32, bool),
     finished: bool,
+    allocator: std.mem.Allocator,
 
     fn init(map: *std.ArrayListAligned(std.ArrayList(Token), null), obstacles_by_row: *std.AutoHashMap(u32, *std.ArrayList(u32)), obstacles_by_col: *std.AutoHashMap(u32, *std.ArrayList(u32)), allocator: std.mem.Allocator) GuardIterator {
-        return .{ .map = map, .direction = 0, .pos = Position.init(4, 6), .obstacles_by_row = obstacles_by_row, .obstacles_by_col = obstacles_by_col, .visited = std.AutoHashMap(i32, bool).init(allocator), .finished = false };
+        return .{ .map = map, .direction = 0, .pos = Position.init(4, 6), .obstacles_by_row = obstacles_by_row, .obstacles_by_col = obstacles_by_col, .visited = std.AutoHashMap(i32, bool).init(allocator), .finished = false, .loop_detector_by_row = std.AutoHashMap(u32, *std.ArrayList([2]u32)).init(allocator), .loop_detector_by_col = std.AutoHashMap(u32, *std.ArrayList([2]u32)).init(allocator), .allocator = allocator };
     }
 
     // Given starting position and obstacle list, give interval to next obstacle
@@ -163,6 +166,7 @@ const GuardIterator = struct {
     fn visitedCount(self: *GuardIterator) usize {
         var buf: [20000]u8 = std.mem.zeroes([20000]u8);
         var buf_cursor: usize = 0;
+        var bonus: usize = 0;
         for (0..self.map.items.len) |i| {
             const row = self.map.items[i];
             for (0..row.items.len) |j| {
@@ -177,6 +181,9 @@ const GuardIterator = struct {
                     buf[buf_cursor] = '#';
                 }
                 if (token.token_type == TokenType.guard) {
+                    if (buf[buf_cursor] != 'X') {
+                        bonus += 1;
+                    }
                     buf[buf_cursor] = '^';
                 }
                 buf_cursor += 1;
@@ -198,10 +205,10 @@ const GuardIterator = struct {
             }
         }
 
-        return self.visited.count();
+        return self.visited.count() + bonus;
     }
 
-    fn next(self: *GuardIterator) ?Position {
+    fn next(self: *GuardIterator) !?Position {
         if (self.finished) {
             return null;
         }
@@ -214,6 +221,20 @@ const GuardIterator = struct {
                     self.pos.y = 0;
                 } else {
                     self.pos.y = @intCast(r.? + 1);
+                    const range = self.interval_calculator(self.pos, self.obstacles_by_col, true);
+                    var start: u32 = @intCast(self.map.items.len);
+                    const stop: u32 = self.pos.y;
+                    if (range != null) {
+                        start = range.?;
+                    }
+                    if (self.loop_detector_by_col.get(self.pos.x)) |list| {
+                        try list.append([2]u32{ start, stop });
+                    } else {
+                        const list = try self.allocator.create(std.ArrayList([2]u32));
+                        list.* = std.ArrayList([2]u32).init(self.allocator);
+                        try list.append([2]u32{ start, stop });
+                        try self.loop_detector_by_col.put(self.pos.x, list);
+                    }
                 }
             },
             1 => {
@@ -223,6 +244,20 @@ const GuardIterator = struct {
                     self.pos.x = @intCast(self.map.items[0].items.len - 1);
                 } else {
                     self.pos.x = @intCast(r.? - 1);
+                    const range = self.interval_calculator(Position.init(self.pos.y, self.pos.x), self.obstacles_by_row, false);
+                    var start: u32 = 0;
+                    const stop: u32 = self.pos.x;
+                    if (range != null) {
+                        start = range.?;
+                    }
+                    if (self.loop_detector_by_row.get(self.pos.y)) |list| {
+                        try list.append([2]u32{ start, stop });
+                    } else {
+                        const list = try self.allocator.create(std.ArrayList([2]u32));
+                        list.* = std.ArrayList([2]u32).init(self.allocator);
+                        try list.append([2]u32{ start, stop });
+                        try self.loop_detector_by_row.put(self.pos.y, list);
+                    }
                 }
             },
             2 => {
@@ -232,6 +267,20 @@ const GuardIterator = struct {
                     self.pos.y = @intCast(self.map.items.len - 1);
                 } else {
                     self.pos.y = @intCast(r.? - 1);
+                    const range = self.interval_calculator(self.pos, self.obstacles_by_col, false);
+                    var start: u32 = 0;
+                    const stop: u32 = self.pos.y;
+                    if (range != null) {
+                        start = range.?;
+                    }
+                    if (self.loop_detector_by_col.get(self.pos.x)) |list| {
+                        try list.append([2]u32{ start, stop });
+                    } else {
+                        const list = try self.allocator.create(std.ArrayList([2]u32));
+                        list.* = std.ArrayList([2]u32).init(self.allocator);
+                        try list.append([2]u32{ start, stop });
+                        try self.loop_detector_by_col.put(self.pos.x, list);
+                    }
                 }
             },
             3 => {
@@ -241,6 +290,20 @@ const GuardIterator = struct {
                     self.pos.x = 0;
                 } else {
                     self.pos.x = @intCast(r.? + 1);
+                    const range = self.interval_calculator(Position.init(self.pos.y, self.pos.x), self.obstacles_by_row, true);
+                    var start: u32 = 0;
+                    const stop: u32 = self.pos.x;
+                    if (range != null) {
+                        start = range.?;
+                    }
+                    if (self.loop_detector_by_row.get(self.pos.y)) |list| {
+                        try list.append([2]u32{ start, stop });
+                    } else {
+                        const list = try self.allocator.create(std.ArrayList([2]u32));
+                        list.* = std.ArrayList([2]u32).init(self.allocator);
+                        try list.append([2]u32{ start, stop });
+                        try self.loop_detector_by_row.put(self.pos.y, list);
+                    }
                 }
             },
             else => {},
@@ -264,19 +327,19 @@ const GuardIterator = struct {
             sign_diff_y = -1;
         }
         const total_tiles = self.map.items.len * self.map.items[0].items.len;
-        // std.log.info("Total tiles: {d}", .{total_tiles});
-        for (0..@abs(diff_x_abs)) |x| {
+
+        for (0..@abs(diff_x_abs + 1)) |x| {
             const casted: i32 = @intCast(x);
-            const _i = (a + sign_diff_x * casted) + c * in_the_a;
+            const _i = (b + sign_diff_x * casted) + d * in_the_a;
             if (!self.visited.contains(_i)) {
                 self.visited.put(_i, _i < total_tiles) catch {
                     return null;
                 };
             }
         }
-        for (0..@abs(diff_y_abs)) |y| {
+        for (0..@abs(diff_y_abs + 1)) |y| {
             const casted: i32 = @intCast(y);
-            const _i = a + (c + casted * sign_diff_y) * in_the_a;
+            const _i = b + (d + casted * sign_diff_y) * in_the_a;
             if (!self.visited.contains(_i)) {
                 self.visited.put(_i, _i < total_tiles) catch {
                     return null;
@@ -356,7 +419,7 @@ fn work(data: []const u8) ![2]i64 {
     guard_iter.pos = init_pos;
     var prev = init_pos;
     while (true) {
-        const next_pos = guard_iter.next();
+        const next_pos = try guard_iter.next();
         if (next_pos == null) {
             break;
         }
