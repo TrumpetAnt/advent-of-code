@@ -11,7 +11,7 @@ const Token = struct {
 
 const TokenizerError = error{EmptyError};
 
-const TokenType = enum { obstacle, open, guard, newline, nil };
+const TokenType = enum { obstacle, placed_obstacle, open, guard, newline, nil };
 
 const Tokenizer = struct {
     data: []const u8,
@@ -57,7 +57,7 @@ const Tokenizer = struct {
     }
 };
 
-const file_path = "demo.txt";
+const file_path = "input.txt";
 const file_size = 18000; //15856;
 
 pub fn main() !void {
@@ -125,16 +125,74 @@ const GuardIterator = struct {
     map: *std.ArrayListAligned(std.ArrayList(Token), null),
     obstacles_by_row: *std.AutoHashMap(u32, *std.ArrayList(u32)),
     obstacles_by_col: *std.AutoHashMap(u32, *std.ArrayList(u32)),
-    loop_detector_by_row: std.AutoHashMap(u32, *std.ArrayList([2]u32)),
-    loop_detector_by_col: std.AutoHashMap(u32, *std.ArrayList([2]u32)),
     direction: u8,
     pos: Position,
-    visited: std.AutoHashMap(i32, bool),
+    placed_obstacle: Position,
+    visited: std.AutoHashMap(i32, *std.ArrayList(u8)),
     finished: bool,
+    looped: bool,
     allocator: std.mem.Allocator,
 
     fn init(map: *std.ArrayListAligned(std.ArrayList(Token), null), obstacles_by_row: *std.AutoHashMap(u32, *std.ArrayList(u32)), obstacles_by_col: *std.AutoHashMap(u32, *std.ArrayList(u32)), allocator: std.mem.Allocator) GuardIterator {
-        return .{ .map = map, .direction = 0, .pos = Position.init(4, 6), .obstacles_by_row = obstacles_by_row, .obstacles_by_col = obstacles_by_col, .visited = std.AutoHashMap(i32, bool).init(allocator), .finished = false, .loop_detector_by_row = std.AutoHashMap(u32, *std.ArrayList([2]u32)).init(allocator), .loop_detector_by_col = std.AutoHashMap(u32, *std.ArrayList([2]u32)).init(allocator), .allocator = allocator };
+        return .{ .map = map, .direction = 0, .pos = Position.init(4, 6), .obstacles_by_row = obstacles_by_row, .obstacles_by_col = obstacles_by_col, .visited = std.AutoHashMap(i32, *std.ArrayList(u8)).init(allocator), .finished = false, .looped = false, .placed_obstacle = undefined, .allocator = allocator };
+    }
+
+    fn append_to_map_list(self: *GuardIterator, comptime T: type, comptime U: type, map: *std.AutoHashMap(T, *std.ArrayList(U)), key: T, val: U) !void {
+        if (map.get(key)) |list| {
+            try list.append(val);
+        } else {
+            const list = try self.allocator.create(std.ArrayList(U));
+            list.* = std.ArrayList(U).init(self.allocator);
+            try list.append(val);
+            try map.put(key, list);
+        }
+    }
+
+    pub fn place_obstacle(self: *GuardIterator, pos: Position) !bool {
+        if (pos.y >= self.map.items.len) {
+            return false;
+        }
+        if (pos.x >= self.map.items[pos.y].items.len) {
+            return false;
+        }
+
+        if (self.map.items[pos.y].items[pos.x].token_type == TokenType.open) {
+            // self.map.items[pos.y].items[pos.x].token_type = TokenType.placed_obstacle;
+            self.placed_obstacle = pos;
+            try self.append_to_map_list(u32, u32, self.obstacles_by_row, pos.y, pos.x);
+            try self.append_to_map_list(u32, u32, self.obstacles_by_col, pos.x, pos.y);
+            return true;
+        }
+        return false;
+    }
+
+    pub fn clear_obstacle(self: *GuardIterator) !void {
+        if (self.obstacles_by_row.get(self.placed_obstacle.y)) |obs| {
+            if (obs.items.len == 0) {
+                return;
+            }
+            var to_remove: usize = 0;
+            for (0..obs.items.len) |i| {
+                if (obs.items[i] == self.placed_obstacle.x) {
+                    to_remove = i;
+                    break;
+                }
+            }
+            _ = obs.orderedRemove(to_remove);
+        }
+        if (self.obstacles_by_col.get(self.placed_obstacle.x)) |obs| {
+            if (obs.items.len == 0) {
+                return;
+            }
+            var to_remove: usize = 0;
+            for (0..obs.items.len) |i| {
+                if (obs.items[i] == self.placed_obstacle.y) {
+                    to_remove = i;
+                    break;
+                }
+            }
+            _ = obs.orderedRemove(to_remove);
+        }
     }
 
     // Given starting position and obstacle list, give interval to next obstacle
@@ -163,6 +221,23 @@ const GuardIterator = struct {
         return res;
     }
 
+    fn track_visited_and_loop_detection(self: *GuardIterator, i: i32) !bool {
+        if (self.visited.get(i)) |list| {
+            for (0..list.items.len) |_i| {
+                if (list.items[_i] == self.direction) {
+                    std.log.info("Loop detected i:{d} dir:{d}", .{ i, self.direction });
+                    return true;
+                }
+            }
+        } else {
+            const list = try self.allocator.create(std.ArrayList(u8));
+            list.* = std.ArrayList(u8).init(self.allocator);
+            try list.append(self.direction);
+            try self.visited.put(i, list);
+        }
+        return false;
+    }
+
     fn visitedCount(self: *GuardIterator) usize {
         var buf: [20000]u8 = std.mem.zeroes([20000]u8);
         var buf_cursor: usize = 0;
@@ -180,6 +255,9 @@ const GuardIterator = struct {
                 if (token.token_type == TokenType.obstacle) {
                     buf[buf_cursor] = '#';
                 }
+                if (self.placed_obstacle.x == j and self.placed_obstacle.y == i) {
+                    buf[buf_cursor] = 'O';
+                }
                 if (token.token_type == TokenType.guard) {
                     if (buf[buf_cursor] != 'X') {
                         bonus += 1;
@@ -191,7 +269,7 @@ const GuardIterator = struct {
             buf[buf_cursor] = '\n';
             buf_cursor += 1;
         }
-        _ = std.io.getStdOut().write(&buf) catch {};
+        // _ = std.io.getStdOut().write(&buf) catch {};
         // std.log.info("\n{s}", .{buf});
 
         var visited_iter = self.visited.iterator();
@@ -199,9 +277,6 @@ const GuardIterator = struct {
             const a = visited_iter.next();
             if (a == null) {
                 break;
-            }
-            if (!a.?.value_ptr.*) {
-                std.log.info("value outside of thing-a-ma-bob ({d})", .{a.?.key_ptr.*});
             }
         }
 
@@ -221,20 +296,6 @@ const GuardIterator = struct {
                     self.pos.y = 0;
                 } else {
                     self.pos.y = @intCast(r.? + 1);
-                    const range = self.interval_calculator(self.pos, self.obstacles_by_col, true);
-                    var start: u32 = @intCast(self.map.items.len);
-                    const stop: u32 = self.pos.y;
-                    if (range != null) {
-                        start = range.?;
-                    }
-                    if (self.loop_detector_by_col.get(self.pos.x)) |list| {
-                        try list.append([2]u32{ start, stop });
-                    } else {
-                        const list = try self.allocator.create(std.ArrayList([2]u32));
-                        list.* = std.ArrayList([2]u32).init(self.allocator);
-                        try list.append([2]u32{ start, stop });
-                        try self.loop_detector_by_col.put(self.pos.x, list);
-                    }
                 }
             },
             1 => {
@@ -244,20 +305,6 @@ const GuardIterator = struct {
                     self.pos.x = @intCast(self.map.items[0].items.len - 1);
                 } else {
                     self.pos.x = @intCast(r.? - 1);
-                    const range = self.interval_calculator(Position.init(self.pos.y, self.pos.x), self.obstacles_by_row, false);
-                    var start: u32 = 0;
-                    const stop: u32 = self.pos.x;
-                    if (range != null) {
-                        start = range.?;
-                    }
-                    if (self.loop_detector_by_row.get(self.pos.y)) |list| {
-                        try list.append([2]u32{ start, stop });
-                    } else {
-                        const list = try self.allocator.create(std.ArrayList([2]u32));
-                        list.* = std.ArrayList([2]u32).init(self.allocator);
-                        try list.append([2]u32{ start, stop });
-                        try self.loop_detector_by_row.put(self.pos.y, list);
-                    }
                 }
             },
             2 => {
@@ -267,20 +314,6 @@ const GuardIterator = struct {
                     self.pos.y = @intCast(self.map.items.len - 1);
                 } else {
                     self.pos.y = @intCast(r.? - 1);
-                    const range = self.interval_calculator(self.pos, self.obstacles_by_col, false);
-                    var start: u32 = 0;
-                    const stop: u32 = self.pos.y;
-                    if (range != null) {
-                        start = range.?;
-                    }
-                    if (self.loop_detector_by_col.get(self.pos.x)) |list| {
-                        try list.append([2]u32{ start, stop });
-                    } else {
-                        const list = try self.allocator.create(std.ArrayList([2]u32));
-                        list.* = std.ArrayList([2]u32).init(self.allocator);
-                        try list.append([2]u32{ start, stop });
-                        try self.loop_detector_by_col.put(self.pos.x, list);
-                    }
                 }
             },
             3 => {
@@ -290,20 +323,6 @@ const GuardIterator = struct {
                     self.pos.x = 0;
                 } else {
                     self.pos.x = @intCast(r.? + 1);
-                    const range = self.interval_calculator(Position.init(self.pos.y, self.pos.x), self.obstacles_by_row, true);
-                    var start: u32 = 0;
-                    const stop: u32 = self.pos.x;
-                    if (range != null) {
-                        start = range.?;
-                    }
-                    if (self.loop_detector_by_row.get(self.pos.y)) |list| {
-                        try list.append([2]u32{ start, stop });
-                    } else {
-                        const list = try self.allocator.create(std.ArrayList([2]u32));
-                        list.* = std.ArrayList([2]u32).init(self.allocator);
-                        try list.append([2]u32{ start, stop });
-                        try self.loop_detector_by_row.put(self.pos.y, list);
-                    }
                 }
             },
             else => {},
@@ -314,36 +333,36 @@ const GuardIterator = struct {
         const c: i32 = @intCast(self.pos.y);
         const d: i32 = @intCast(prev_pos.y);
         const in_the_a: i32 = @intCast(self.map.items[0].items.len);
-        const diff_x: i32 = b - a;
+        const diff_x: i32 = a - b;
         const diff_x_abs: i32 = @intCast(@abs(diff_x));
         var sign_diff_x: i32 = 1;
         if (diff_x < 0) {
             sign_diff_x = -1;
         }
-        const diff_y: i32 = d - c;
+        const diff_y: i32 = c - d;
         const diff_y_abs: i32 = @intCast(@abs(diff_y));
         var sign_diff_y: i32 = 1;
         if (diff_y < 0) {
             sign_diff_y = -1;
         }
-        const total_tiles = self.map.items.len * self.map.items[0].items.len;
 
-        for (0..@abs(diff_x_abs + 1)) |x| {
+        for (1..@abs(diff_x_abs + 1)) |x| {
             const casted: i32 = @intCast(x);
-            const _i = (b + sign_diff_x * casted) + d * in_the_a;
-            if (!self.visited.contains(_i)) {
-                self.visited.put(_i, _i < total_tiles) catch {
-                    return null;
-                };
+            const _x = (b + sign_diff_x * casted);
+            const _i = _x + d * in_the_a;
+            if (try self.track_visited_and_loop_detection(_i)) {
+                self.finished = true;
+                self.looped = true;
+                return self.pos;
             }
         }
-        for (0..@abs(diff_y_abs + 1)) |y| {
+        for (1..@abs(diff_y_abs + 1)) |y| {
             const casted: i32 = @intCast(y);
             const _i = b + (d + casted * sign_diff_y) * in_the_a;
-            if (!self.visited.contains(_i)) {
-                self.visited.put(_i, _i < total_tiles) catch {
-                    return null;
-                };
+            if (try self.track_visited_and_loop_detection(_i)) {
+                self.finished = true;
+                self.looped = true;
+                return self.pos;
             }
         }
         self.direction = (self.direction + 1) % 4;
@@ -415,17 +434,51 @@ fn work(data: []const u8) ![2]i64 {
         }
     }
 
+    var second_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer second_arena.deinit();
+    const second_allocator = second_arena.allocator();
+
+    var loop_possibilities: i64 = 0;
+    for (0..map.items.len) |row| {
+        for (0..map.items[row].items.len) |col| {
+            var guard_iter = GuardIterator.init(&map, &obstacles_by_row, &obstacles_by_col, second_allocator);
+            guard_iter.pos = init_pos;
+            if (!try guard_iter.place_obstacle(Position.init(@intCast(row), @intCast(col)))) {
+                // std.log.info("unable to place obstacle there", .{});
+                continue;
+            }
+            var prev = init_pos;
+            while (true) {
+                const next_pos = try guard_iter.next();
+                if (next_pos == null) {
+                    break;
+                }
+                // std.log.info("Path ({d},{d})->({d},{d})", .{ prev.x, prev.y, next_pos.?.x, next_pos.?.y });
+                prev = next_pos.?;
+            }
+
+            if (guard_iter.looped) {
+                _ = guard_iter.visitedCount();
+                loop_possibilities += 1;
+            }
+            try guard_iter.clear_obstacle();
+            _ = second_arena.reset(std.heap.ArenaAllocator.ResetMode.retain_capacity);
+        }
+    }
     var guard_iter = GuardIterator.init(&map, &obstacles_by_row, &obstacles_by_col, allocator);
     guard_iter.pos = init_pos;
+    if (!try guard_iter.place_obstacle(Position.init(3, 6))) {
+        std.log.info("unable to place obstacle there", .{});
+    }
     var prev = init_pos;
     while (true) {
         const next_pos = try guard_iter.next();
         if (next_pos == null) {
             break;
         }
-        std.log.info("Path ({d},{d})->({d},{d})", .{ prev.x, prev.y, next_pos.?.x, next_pos.?.y });
+        // std.log.info("Path ({d},{d})->({d},{d})", .{ prev.x, prev.y, next_pos.?.x, next_pos.?.y });
         prev = next_pos.?;
     }
     const res_one: i64 = @intCast(guard_iter.visitedCount());
-    return [2]i64{ res_one, 0 };
+    return [2]i64{ res_one, loop_possibilities };
 }
