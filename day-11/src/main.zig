@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const blinks: usize = 75;
+
 const Chain = struct {
     val: u128,
     left: ?*Chain,
@@ -29,7 +31,7 @@ const Chain = struct {
                 self.right = try allocator.create(Chain);
                 const r = @mod(self.val, split);
                 self.right.?.* = Chain.init(r);
-                std.log.info("funkylicious: split({d}) l({d}) r({d}))", .{ split, l, r });
+                // std.log.info("funkylicious: split({d}) l({d}) r({d}))", .{ split, l, r });
                 return null;
             } else {
                 self.child = try allocator.create(Chain);
@@ -46,7 +48,7 @@ const Chain = struct {
     fn get_depth(self: *Chain, level: usize) usize {
         std.log.info("Checking depth for val {d} at level {d}", .{ self.val, level });
         var res: usize = 1;
-        if (level >= 76) {
+        if (level >= blinks + 1) {
             // return 1;
             res = 1;
         } else {
@@ -67,6 +69,34 @@ const Chain = struct {
         std.log.info("Depth checked for val {d} at level {d} and result is {d}", .{ self.val, level, res });
         return res;
     }
+
+    fn get_depth_dynamic_programming(self: *Chain, level: usize, depth_map: *std.AutoHashMap(usize, *std.AutoHashMap(u128, usize))) !usize {
+        var res: usize = 1;
+        var level_map: *std.AutoHashMap(u128, usize) = undefined;
+        if (level >= blinks + 1) {
+            res = 1;
+        } else {
+            if (depth_map.get(level)) |ye| {
+                level_map = ye;
+                if (ye.get(self.val)) |precalc| {
+                    res = precalc;
+                    return res;
+                }
+            } else {
+                // this should not happen, should be preallocated
+                @panic("wow this is really bad");
+            }
+            if (self.child != null) {
+                res = try self.child.?.get_depth_dynamic_programming(level + 1, depth_map);
+            } else if (self.duplicate != null) {
+                res = try self.duplicate.?.get_depth_dynamic_programming(level, depth_map);
+            } else if (self.left != null) {
+                res = try self.left.?.get_depth_dynamic_programming(level + 1, depth_map) + try self.right.?.get_depth_dynamic_programming(level + 1, depth_map);
+            }
+            try level_map.put(self.val, res);
+        }
+        return res;
+    }
 };
 
 pub fn main() !void {
@@ -76,7 +106,6 @@ pub fn main() !void {
 
     // const input = [2]u128{ 125, 17 };
     const input = [8]u128{ 8793800, 1629, 65, 5, 960, 0, 138983, 85629 };
-    const blinks = 75;
 
     var chain_map = std.AutoHashMap(u128, *Chain).init(allocator);
 
@@ -91,34 +120,34 @@ pub fn main() !void {
     var count: usize = 0;
     for (0..blinks) |blink| {
         var blink_buf: [100]u8 = undefined;
-        const blink_string = try std.fmt.bufPrint(&blink_buf, "Blink {d}/{d}\n", .{ blink, blinks });
+        const blink_string = try std.fmt.bufPrint(&blink_buf, "Blink {d}/{d}\n", .{ blink + 1, blinks });
         _ = try stdout.write(blink_string);
         const l = frontier.items.len - 1;
-        std.log.info("Another blink with {d} items in frontier ", .{l});
+        // std.log.info("Another blink with {d} items in frontier ", .{l});
         for (0..l + 1) |j| {
             count += 1;
 
             const chain = frontier.items[l - j];
-            std.log.info("Iter {d} with {d} chains in map", .{ count, chain_map.count() });
+            // std.log.info("Iter {d} with {d} chains in map", .{ count, chain_map.count() });
             if (chain_map.get(chain.val)) |present| {
                 chain.duplicate = present;
                 _ = frontier.orderedRemove(l - j);
                 // chain.parent = present;
-                std.log.info("  [D] Found duplicate for {d}", .{present.*.val});
+                // std.log.info("  [D] Found duplicate for {d}", .{present.*.val});
                 continue;
             } else {
-                std.log.info("  [N] First time seeing {d}", .{chain.*.val});
+                // std.log.info("  [N] First time seeing {d}", .{chain.*.val});
                 try chain_map.put(chain.val, chain);
             }
             const next = try chain.step(allocator);
             if (next == null) {
-                std.log.info("  [S] Split {d} into {d} & {d}", .{ chain.*.val, chain.*.left.?.val, chain.*.right.?.val });
+                // std.log.info("  [S] Split {d} into {d} & {d}", .{ chain.*.val, chain.*.left.?.val, chain.*.right.?.val });
                 frontier.items[l - j] = chain.left.?;
                 frontier.insert(l - j + 1, chain.right.?) catch |err| {
                     std.log.err("We hit an error {any}", .{err});
                 };
             } else {
-                std.log.info("  [U] Updated {d}->{d}", .{ chain.*.val, next.?.*.val });
+                // std.log.info("  [U] Updated {d}->{d}", .{ chain.*.val, next.?.*.val });
                 frontier.items[l - j] = next.?;
             }
         }
@@ -126,13 +155,20 @@ pub fn main() !void {
 
     // mapping levels to maps, where the inner maps map key value to calculated depth
     var depth_map = std.AutoHashMap(usize, *std.AutoHashMap(u128, usize)).init(allocator);
-    // var depth_frontier = std.ArrayList(u128).init(allocator);
+    // populate depth_map
+    for (1..blinks + 1) |i| {
+        const map = try allocator.create(std.AutoHashMap(u128, usize));
+        map.* = std.AutoHashMap(u128, usize).init(allocator);
+        try depth_map.put(i, map);
+    }
+
+    _ = try stdout.write("Blinks completed, graph complete, time to calculate depth, hold on a moment...");
 
     var sum: usize = 0;
     for (0..input.len) |i| {
         // try depth_frontier.append(input[i]);
         if (chain_map.get(input[i])) |chain| {
-            const d = chain.get_depth(1);
+            const d = try chain.get_depth_dynamic_programming(1, &depth_map);
             std.log.info("Depth for {d}={d}", .{ input[i], d });
             sum += d;
         } else {
