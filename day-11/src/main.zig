@@ -44,23 +44,28 @@ const Chain = struct {
     }
 
     fn get_depth(self: *Chain, level: usize) usize {
-        // std.log.info("Checking depth for val {d} at level {d}", .{ self.val, level });
-        if (level >= 25) {
-            return 1;
+        std.log.info("Checking depth for val {d} at level {d}", .{ self.val, level });
+        var res: usize = 1;
+        if (level >= 76) {
+            // return 1;
+            res = 1;
+        } else {
+            if (self.child != null) {
+                std.log.info("goin deeper by child", .{});
+                // return self.child.?.get_depth(level + 1);
+                res = self.child.?.get_depth(level + 1);
+            } else if (self.duplicate != null) {
+                std.log.info("goin deeper by duplicate", .{});
+                // return self.duplicate.?.get_depth(level);
+                res = self.duplicate.?.get_depth(level);
+            } else if (self.left != null) {
+                std.log.info("goin deeper by split", .{});
+                // return self.left.?.get_depth(level + 1) + self.right.?.get_depth(level + 1);
+                res = self.left.?.get_depth(level + 1) + self.right.?.get_depth(level + 1);
+            }
         }
-
-        if (self.child != null) {
-            // std.log.info("goin deeper by child", .{});
-            return self.child.?.get_depth(level + 1);
-        } else if (self.duplicate != null) {
-            // std.log.info("goin deeper by duplicate", .{});
-            return self.duplicate.?.get_depth(level);
-        } else if (self.left != null) {
-            // std.log.info("goin deeper by split", .{});
-            return self.left.?.get_depth(level + 1) + self.right.?.get_depth(level + 1);
-        }
-
-        return 1;
+        std.log.info("Depth checked for val {d} at level {d} and result is {d}", .{ self.val, level, res });
+        return res;
     }
 };
 
@@ -69,8 +74,9 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const input = [7]u128{ 1, 2024, 1, 0, 9, 9, 2021976 };
-    const blinks = 25;
+    // const input = [2]u128{ 125, 17 };
+    const input = [8]u128{ 8793800, 1629, 65, 5, 960, 0, 138983, 85629 };
+    const blinks = 75;
 
     var chain_map = std.AutoHashMap(u128, *Chain).init(allocator);
 
@@ -81,8 +87,12 @@ pub fn main() !void {
         try frontier.append(chain);
     }
 
+    const stdout = std.io.getStdOut().writer();
     var count: usize = 0;
-    for (0..blinks) |_| {
+    for (0..blinks) |blink| {
+        var blink_buf: [100]u8 = undefined;
+        const blink_string = try std.fmt.bufPrint(&blink_buf, "Blink {d}/{d}\n", .{ blink, blinks });
+        _ = try stdout.write(blink_string);
         const l = frontier.items.len - 1;
         std.log.info("Another blink with {d} items in frontier ", .{l});
         for (0..l + 1) |j| {
@@ -114,7 +124,8 @@ pub fn main() !void {
         }
     }
 
-    // var depth_map = std.AutoHashMap(u128, *Chain).init(allocator);
+    // mapping levels to maps, where the inner maps map key value to calculated depth
+    var depth_map = std.AutoHashMap(usize, *std.AutoHashMap(u128, usize)).init(allocator);
     // var depth_frontier = std.ArrayList(u128).init(allocator);
 
     var sum: usize = 0;
@@ -130,7 +141,6 @@ pub fn main() !void {
     }
 
     var b: [100]u8 = undefined;
-    const s = try std.fmt.bufPrint(&b, "{d},{d}\n", .{ chain_map.count(), sum });
-    const stdout = std.io.getStdOut().writer();
+    const s = try std.fmt.bufPrint(&b, "{d},{d}\n", .{ sum, 0 });
     _ = try stdout.write(s);
 }
