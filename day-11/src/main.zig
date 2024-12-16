@@ -162,7 +162,7 @@ pub fn main() !void {
         try depth_map.put(i, map);
     }
 
-    _ = try stdout.write("Blinks completed, graph complete, time to calculate depth, hold on a moment...");
+    _ = try stdout.write("Blinks completed, graph complete, time to calculate depth, hold on a moment...\n");
 
     var sum: usize = 0;
     for (0..input.len) |i| {
