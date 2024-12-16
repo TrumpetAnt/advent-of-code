@@ -67,7 +67,7 @@ const Tokenizer = struct {
     }
 };
 
-const Operator = enum { mul, add };
+const Operator = enum { mul, add, con };
 
 const Equation = struct {
     target: u128,
@@ -93,11 +93,9 @@ const Equation = struct {
 
     fn attempt_solve(self: *Equation) !bool {
         const wha: usize = 1;
-        const n: usize = wha << @intCast(self.numbers.items.len - wha);
-        std.log.info("Solve attempt: {d}={any} [{d}]", .{ self.target, self.numbers.items, n });
-        for (0..n) |i| {
+        const d = try std.math.powi(usize, 3, self.numbers.items.len - wha);
+        for (0..d) |i| {
             if (self.target == try thinga_binga(self.numbers.items, i)) {
-                std.log.info("Equation checks out: {d}={any}", .{ self.target, self.numbers.items });
                 return true;
             }
         }
@@ -108,7 +106,7 @@ const Equation = struct {
 fn thinga_binga(vals: []u128, iter: usize) !u128 {
     var total: u128 = vals[0];
     for (1..vals.len) |i| {
-        const op = iter_to_operator(iter, i - 1);
+        const op = try iter_to_operator(iter, i - 1);
         switch (op) {
             Operator.add => {
                 total += vals[i];
@@ -116,19 +114,30 @@ fn thinga_binga(vals: []u128, iter: usize) !u128 {
             Operator.mul => {
                 total *= vals[i];
             },
+            Operator.con => {
+                // const t = total;
+                const digits: u7 = std.math.log10_int(vals[i]) + 1;
+                total *= try std.math.powi(u128, 10, digits);
+                // const intermediate = total;
+                total += vals[i];
+                // std.log.info("Concat: {d} << {d} = {d} ; {d} + {d} = {d}", .{ t, digits, intermediate, intermediate, vals[i], total });
+            },
         }
     }
     return total;
 }
 
-fn iter_to_operator(iter: usize, i: usize) Operator {
-    const first_bit_zero = (iter >> @intCast(i)) % 2 == 0;
-    if (first_bit_zero) {
-        return Operator.mul;
-    }
-    return Operator.add;
+fn iter_to_operator(iter: usize, i: usize) !Operator {
+    const k: usize = @divTrunc(iter, try std.math.powi(usize, 3, i));
+    return switch (k % 3) {
+        0 => Operator.mul,
+        1 => Operator.add,
+        2 => Operator.con,
+        else => Operator.add,
+    };
 }
-
+// 7885693428401
+// 7885693482141
 const file_path = "input.txt";
 const file_size = 26000; //15856;
 
