@@ -79,6 +79,7 @@ const RectMap = struct {
     map: *std.AutoHashMap(Position, Token),
     type_to_list: *std.AutoHashMap(u8, *std.ArrayList(Position)),
     antinodes: *std.AutoHashMap(Position, bool),
+    antinodes_p2: *std.AutoHashMap(Position, bool),
     width: usize,
     height: usize,
 
@@ -86,12 +87,14 @@ const RectMap = struct {
         const map = try allocator.create(std.AutoHashMap(Position, Token));
         const type_to_list = try allocator.create(std.AutoHashMap(u8, *std.ArrayList(Position)));
         const antinodes = try allocator.create(std.AutoHashMap(Position, bool));
+        const antinodes_p2 = try allocator.create(std.AutoHashMap(Position, bool));
 
         map.* = std.AutoHashMap(Position, Token).init(allocator);
         type_to_list.* = std.AutoHashMap(u8, *std.ArrayList(Position)).init(allocator);
         antinodes.* = std.AutoHashMap(Position, bool).init(allocator);
+        antinodes_p2.* = std.AutoHashMap(Position, bool).init(allocator);
 
-        return .{ .allocator = allocator, .map = map, .type_to_list = type_to_list, .antinodes = antinodes, .width = width, .height = 0 };
+        return .{ .allocator = allocator, .map = map, .type_to_list = type_to_list, .antinodes = antinodes, .antinodes_p2 = antinodes_p2, .width = width, .height = 0 };
     }
 
     fn add_row(self: *RectMap, row: []Token) !void {
@@ -129,12 +132,16 @@ const RectMap = struct {
                         continue;
                     }
                     const antinode_1 = self.check_antinode(val.items[i], val.items[j]);
-                    const antinode_2 = self.check_antinode(val.items[j], val.items[i]);
                     if (antinode_1 != null) {
                         try self.antinodes.put(antinode_1.?, true);
                     }
-                    if (antinode_2 != null) {
-                        try self.antinodes.put(antinode_2.?, true);
+
+                    var depth: i32 = 0;
+                    var an_p2 = self.check_antinode_p2(val.items[i], val.items[j], depth);
+                    while (an_p2 != null) {
+                        try self.antinodes_p2.put(an_p2.?, true);
+                        depth += 1;
+                        an_p2 = self.check_antinode_p2(val.items[i], val.items[j], depth);
                     }
                 }
             }
@@ -154,18 +161,30 @@ const RectMap = struct {
         return null;
     }
 
+    fn check_antinode_p2(self: *RectMap, a: Position, b: Position, dist: i32) ?Position {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const px = a.x + dx * dist;
+        const py = a.y + dy * dist;
+        // std.log.info("checking ({d},{d}) against map size {d}x{d}", .{ px, py, self.width, self.height });
+        if (px >= 0 and px < self.width and py >= 0 and py < self.height) {
+            return Position.init(px, py);
+        }
+        return null;
+    }
+
     fn print_map(self: *RectMap) !void {
         const stdout = std.io.getStdOut().writer();
         try stdout.writeByte('\n');
         for (0..self.height) |row| {
             for (0..self.width) |col| {
                 const pos = Position.init(@intCast(col), @intCast(row));
-                if (self.map.get(pos)) |token| {
-                    try stdout.writeByte(token.token[0]);
+                if (self.antinodes_p2.contains(pos)) {
+                    try stdout.writeByte('#');
                     continue;
                 }
-                if (self.antinodes.contains(pos)) {
-                    try stdout.writeByte('#');
+                if (self.map.get(pos)) |token| {
+                    try stdout.writeByte(token.token[0]);
                     continue;
                 }
                 try stdout.writeByte('.');
@@ -267,7 +286,7 @@ fn work(data: []const u8) ![2]u128 {
 
     const no_antinodes = try map.?.calculate_antinodes();
 
-    try map.?.print_map();
+    // try map.?.print_map();
 
-    return [2]u128{ @intCast(no_antinodes), 0 };
+    return [2]u128{ @intCast(no_antinodes), @intCast(map.?.antinodes_p2.count()) };
 }
