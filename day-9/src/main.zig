@@ -164,6 +164,24 @@ const Block = struct {
         return null;
     }
 
+    fn find_available_no_recursion(self: *Block, mem_size: u32) ?*Block {
+        var cursor: ?*Block = self.prev;
+        var better_option: ?*Block = null;
+        while (cursor != null) {
+            if (cursor.?.padding >= mem_size) {
+                better_option = cursor;
+            }
+            cursor = cursor.?.prev;
+        }
+        if (better_option != null) {
+            return better_option;
+        }
+        if (self.padding >= mem_size) {
+            return self;
+        }
+        return null;
+    }
+
     fn checksum(self: *Block, i: u128, acc: u128) u128 {
         var r_acc = acc;
         var r_i = i;
@@ -175,6 +193,20 @@ const Block = struct {
             return r_acc;
         }
         return self.next.?.checksum(r_i + @as(u128, self.padding), r_acc);
+    }
+
+    fn checksum_no_recursion(self: *Block, i: u128, acc: u128) u128 {
+        var cursor: ?*Block = self;
+        var r_acc = acc;
+        var r_i = i;
+        while (cursor != null) {
+            for (0..cursor.?.size) |_| {
+                r_acc += r_i * @as(u128, cursor.?.id);
+                r_i += 1;
+            }
+            cursor = cursor.?.next;
+        }
+        return r_acc;
     }
 
     fn print(self: *Block, file: std.fs.File) !void {
@@ -223,7 +255,7 @@ fn part_two(data: []const u8) !u128 {
         const block = cursor.?;
         cursor = block.prev;
         if (block.prev != null) {
-            const target = block.prev.?.find_available(block.size);
+            const target = block.prev.?.find_available_no_recursion(block.size);
             if (target != null) {
                 block.move_to_block(target.?);
             }
@@ -231,5 +263,5 @@ fn part_two(data: []const u8) !u128 {
     }
 
     // try memory_list.items[0].print(std.io.getStdOut());
-    return memory_list.items[0].checksum(0, 0);
+    return memory_list.items[0].checksum_no_recursion(0, 0);
 }
