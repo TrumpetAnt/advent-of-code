@@ -57,68 +57,39 @@ pub fn main() !void {
     _ = try stdout.write(s);
 }
 
-const Block = struct {
-    id: u32,
-    size: u8,
-    gap: u8,
-
-    fn init(id: u32, size: u8, gap: u8) Block {
-        return .{
-            .id = id,
-            .size = size,
-            .gap = gap,
-        };
-    }
-};
-
 fn work(data: []const u8) ![2]u128 {
-    std.log.info("data: {s} len {d}", .{ data, data.len });
+    return [2]u128{ part_one(data), try part_two(data) };
+}
 
-    // read blocks
-    // loop
-    //   find next gap,
-    //   fill with last elem,
-    //   update block list,
-    // end loop if no next gap
-
-    var checksum: u64 = 0;
+fn part_one(data: []const u8) u128 {
+    var checksum: u128 = 0;
     var checksum_cursor: usize = 0;
     var front_cursor: usize = 0;
     var back_cursor: usize = 0;
     var back_num_stored: usize = 0;
     var back_num_quantity: u8 = 0;
 
-    const stdout = std.io.getStdOut().writer();
-    try stdout.writeByte('\n');
-
     while (front_cursor + back_cursor < data.len) {
         var num: u8 = data[front_cursor] - 48;
-        const is_padding = front_cursor % 2 == 1;
+        const is_free_space = front_cursor % 2 == 1;
         const id: usize = @divFloor(front_cursor, 2);
-        // std.log.info("num: {d} is_padding: {any} id: {d}", .{ num, is_padding, id });
         front_cursor += 1;
-        if (!is_padding) {
+        if (!is_free_space) {
             for (0..num) |_| {
                 checksum += checksum_cursor * id;
                 checksum_cursor += 1;
-                // std.log.info("checksum: {d} cursor: {d} id: {d}", .{ checksum, checksum_cursor, id });
-                try stdout.print("({d})", .{id});
-                try stdout.writeByte(' ');
             }
         } else {
             while (num > 0 and front_cursor + back_cursor < data.len) {
                 if (back_num_quantity == 0) {
                     back_num_quantity = data[data.len - back_cursor - 1] - 48;
                     back_num_stored = @divFloor(data.len - back_cursor - 1, 2);
-                    // std.log.info("quant: {d} stored {d} cursor: {d}", .{ back_num_quantity, back_num_stored, back_cursor });
                     back_cursor += 2;
                 }
                 if (back_num_quantity <= num) {
                     for (0..back_num_quantity) |_| {
                         checksum += checksum_cursor * back_num_stored;
                         checksum_cursor += 1;
-                        try stdout.print("[{d}]", .{back_num_stored});
-                        try stdout.writeByte(' ');
                     }
                     num -= back_num_quantity;
                     back_num_quantity = 0;
@@ -126,8 +97,6 @@ fn work(data: []const u8) ![2]u128 {
                     for (0..num) |_| {
                         checksum += checksum_cursor * back_num_stored;
                         checksum_cursor += 1;
-                        try stdout.print("{d}", .{back_num_stored});
-                        try stdout.writeByte(' ');
                     }
                     back_num_quantity -= num;
                     num = 0;
@@ -138,9 +107,129 @@ fn work(data: []const u8) ![2]u128 {
     for (0..back_num_quantity) |_| {
         checksum += checksum_cursor * back_num_stored;
         checksum_cursor += 1;
-        try stdout.print("[{d}]", .{back_num_stored});
-        try stdout.writeByte(' ');
     }
-    try stdout.writeByte('\n');
-    return [2]u128{ checksum, 0 };
+    return checksum;
+}
+
+const Block = struct {
+    id: u64,
+    size: u32,
+    padding: u32,
+    prev: ?*Block,
+    next: ?*Block,
+
+    fn init(id: u64, size: u8, padding: u8) Block {
+        return .{ .id = id, .size = @intCast(size), .padding = @intCast(padding), .prev = null, .next = null };
+    }
+
+    fn connect_prev(self: *Block, other: ?*Block) void {
+        if (self.prev != null) {
+            self.prev.?.next = null;
+        }
+        self.prev = other;
+        if (other != null) {
+            other.?.next = self;
+        }
+    }
+
+    fn move_to_block(self: *Block, other: *Block) void {
+        if (self.prev != null) {
+            self.prev.?.padding += self.size + self.padding;
+            if (self.next != null) {
+                self.prev.?.next = self.next;
+                self.next.?.prev = self.prev;
+            } else {
+                self.prev.?.next = null;
+            }
+        }
+        self.next = other.next;
+        other.next = self;
+        if (self.next != null) {
+            self.next.?.prev = self;
+        }
+        self.prev = other;
+        self.padding = other.padding - self.size;
+        other.padding = 0;
+    }
+
+    fn find_available(self: *Block, mem_size: u32) ?*Block {
+        if (self.prev != null) {
+            if (self.prev.?.find_available(mem_size)) |better_option| {
+                return better_option;
+            }
+        }
+        if (self.padding >= mem_size) {
+            return self;
+        }
+        return null;
+    }
+
+    fn checksum(self: *Block, i: u128, acc: u128) u128 {
+        var r_acc = acc;
+        var r_i = i;
+        for (0..self.size) |_| {
+            r_acc += r_i * @as(u128, self.id);
+            r_i += 1;
+        }
+        if (self.next == null) {
+            return r_acc;
+        }
+        return self.next.?.checksum(r_i + @as(u128, self.padding), r_acc);
+    }
+
+    fn print(self: *Block, file: std.fs.File) !void {
+        const writer = file.writer();
+        for (0..self.size) |_| {
+            try writer.print("{d} ", .{self.id});
+        }
+        for (0..self.padding) |_| {
+            try writer.writeByte('.');
+            try writer.writeByte(' ');
+        }
+        if (self.next != null) {
+            try self.next.?.print(file);
+        }
+    }
+};
+
+fn part_two(data: []const u8) !u128 {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var memory_list = std.ArrayList(*Block).init(allocator);
+
+    var id_counter: u64 = 0;
+    var i: usize = 0;
+    var prev: ?*Block = null;
+    while (i < data.len) {
+        const size = data[i] - 48;
+        var padding: u8 = 0;
+        if (i + 1 < data.len) {
+            padding = data[i + 1] - 48;
+        }
+        const block = try allocator.create(Block);
+        block.* = Block.init(id_counter, size, padding);
+        block.connect_prev(prev);
+        try memory_list.append(block);
+        prev = block;
+        i += 2;
+        id_counter += 1;
+    }
+
+    var cursor: ?*Block = memory_list.items[memory_list.items.len - 1];
+
+    while (cursor != null) {
+        const block = cursor.?;
+        cursor = block.prev;
+        if (block.prev != null) {
+            const target = block.prev.?.find_available(block.size);
+            if (target != null) {
+                block.move_to_block(target.?);
+            }
+        }
+    }
+
+    // try memory_list.items[0].print(std.io.getStdOut());
+    return memory_list.items[0].checksum(0, 0);
 }
