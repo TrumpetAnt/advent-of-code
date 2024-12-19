@@ -193,15 +193,6 @@ const RectMap = struct {
         }
         try stdout.writeByte('\n');
         try stdout.print("no antinodes: {d}\n", .{self.antinodes.count()});
-
-        // var iter = self.antinodes.keyIterator();
-        // while (true) {
-        //     const next = iter.next();
-        //     if (next == null) {
-        //         break;
-        //     }
-        //     try stdout.print("{d},{d}\n", .{ next.?.x, next.?.y });
-        // }
     }
 };
 
